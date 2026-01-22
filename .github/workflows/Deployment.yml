@@ -39,21 +39,34 @@ jobs:
       - name: Sync Dev Workspace with Git and Validate
         shell: pwsh
         run: |
+          # ============================================================================
+          # Script: Sync Development Workspace with Git and Validate
+          # Purpose: Ensures the Development workspace is synchronized with Git and has
+          #          no uncommitted changes before proceeding with deployment
+          # ============================================================================
+          
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
 
+          # Helper functions for logging and error handling
           function Log([string]$m){ Write-Host "[$(Get-Date -Format o)] $m" }
           function Fail([string]$m){ Write-Error $m; exit 1 }
 
+          # Acquire access token for Fabric API
           $fabricResource = "${{ env.FABRIC_RESOURCE }}"
           $token = az account get-access-token --resource $fabricResource --query accessToken -o tsv 2>&1
           if ([string]::IsNullOrWhiteSpace($token)) { Fail "Failed to acquire Fabric token." }
 
+          # Helper function to invoke Fabric REST API using Azure CLI
+          # Returns: Custom object with Status (HTTP code), ExitCode, OutJson (response), ErrText (error details)
           function Invoke-FabricApi([string]$Method,[string]$Uri,[string]$BodyJson){
             $headers = @("Authorization=Bearer $token","Content-Type=application/json")
             $cliArgs = @('rest', '--method', $Method, '--uri', $Uri, '--headers') + $headers
+            
+            # If body provided, write to temp file for az cli to read
             if ($BodyJson){ $tmp = New-TemporaryFile; $BodyJson | Out-File -Encoding utf8 -FilePath $tmp; $cliArgs += @('--body', "@$tmp") }
 
+            # Execute az rest command via ProcessStartInfo to capture all output
             $psi = New-Object System.Diagnostics.ProcessStartInfo
             $psi.FileName = "az"
             $psi.RedirectStandardError = $true
@@ -66,13 +79,18 @@ jobs:
             $err = $p.StandardError.ReadToEnd()
             $p.WaitForExit()
 
+            # Clean up temp file if created
             if ($tmp -and (Test-Path $tmp)) { Remove-Item $tmp -Force }
 
+            # Extract HTTP status code from stderr
             $status = ($err -split "`n" | Select-String -Pattern 'Status Code:\s*(\d+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -Last 1)
             [pscustomobject]@{ Status=$status; ExitCode=$p.ExitCode; OutJson=$out; ErrText=$err }
           }
 
-          # Resolve workspace ID
+          # ============================================================================
+          # STEP 1: Resolve Development Workspace ID
+          # If DEV_WORKSPACE_ID is empty, look up workspace by name
+          # ============================================================================
           $workspaceId = "${{ env.DEV_WORKSPACE_ID }}"
           if ([string]::IsNullOrWhiteSpace($workspaceId)) {
             Log "Looking up workspace by name: ${{ env.DEV_WORKSPACE_NAME }}"
@@ -85,7 +103,10 @@ jobs:
           }
           Log "Dev Workspace ID: $workspaceId"
 
-          # Check Git connection status
+          # ============================================================================
+          # STEP 2: Verify Git Connection
+          # Ensure the workspace is connected to a Git repository
+          # ============================================================================
           Log "Checking workspace Git connection..."
           $r = Invoke-FabricApi -Method GET -Uri "$fabricResource/v1/workspaces/$workspaceId/git/connection"
           if ($r.ExitCode -ne 0 -or $r.Status -eq '404'){
@@ -102,7 +123,12 @@ jobs:
             $gitConn | ConvertTo-Json -Depth 6 | Out-Host
           }
 
-          # Optionally configure Git credentials for service principal
+          # ============================================================================
+          # STEP 3: Configure Git Credentials for Service Principal
+          # Uses ConfiguredConnection method to set Git credentials for API access
+          # ============================================================================
+          
+          # Extract connection ID from Git connection response (property name varies by API version)
           $gitConnectionId = $null
           if ($gitConn.PSObject.Properties.Name -contains 'gitConnectionId') { $gitConnectionId = $gitConn.gitConnectionId }
           elseif ($gitConn.PSObject.Properties.Name -contains 'connectionId') { $gitConnectionId = $gitConn.connectionId }
@@ -113,6 +139,7 @@ jobs:
           elseif ($gitConn.gitProviderDetails -and $gitConn.gitProviderDetails.PSObject.Properties.Name -contains 'gitProviderType') { $gitProviderType = $gitConn.gitProviderDetails.gitProviderType }
           if (-not $gitProviderType) { $gitProviderType = 'GitHub' }
 
+          # Override with secret if provided (preferred method)
           $gitConnectionId = "${{ env.FABRIC_GIT_CONNECTION_ID }}"
           
           # Default username to git owner if not provided
@@ -121,37 +148,65 @@ jobs:
             Log "Using Git owner as username: $gitUsername"
           }
 
+          # Configure credentials using pre-created Git connection (recommended for service principals)
           if (-not [string]::IsNullOrWhiteSpace($gitConnectionId)) {
-            Log "Setting Git credentials for service principal via myGitCredentials (ConfiguredConnection)..."
-            $body = @{
-              source = "ConfiguredConnection"
-              connectionId = $gitConnectionId
-            }
-
-            if ("${{ env.DEBUG }}" -eq '1') {
-              Log "PATCH body:"
-              $body | ConvertTo-Json -Depth 5 | Out-Host
-            }
-
-            $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
-            if ($r.ExitCode -ne 0){
-              $r.ErrText | Out-Host
-              Write-Host "::error::Failed to set Git credentials using ConfiguredConnection."
-              Write-Host "::error::Verify FABRIC_GIT_CONNECTION_ID is correct and the connection exists."
-              Fail "Unable to configure Git credentials for service principal."
-            }
+            # Check current Git credentials configuration
+            Log "Checking current Git credentials configuration..."
+            $r = Invoke-FabricApi -Method GET -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials"
             
-            Log "Git credentials updated for service principal."
-            Log "Waiting 5 seconds for credentials to propagate..."
-            Start-Sleep -Seconds 5
+            $needsUpdate = $true
+            if ($r.ExitCode -eq 0 -and $r.OutJson) {
+              $currentCreds = $r.OutJson | ConvertFrom-Json
+              Log "Current credentials source: $($currentCreds.source)"
+              
+              # Check if already configured with the same connection
+              if ($currentCreds.source -eq "ConfiguredConnection" -and $currentCreds.connectionId -eq $gitConnectionId) {
+                Log "✓ Git credentials already configured with the same connection ID. Skipping update."
+                $needsUpdate = $false
+              }
+              else {
+                Log "Git credentials need to be updated (current connection: $($currentCreds.connectionId))"
+              }
+            }
+            else {
+              Log "No existing credentials found. Will configure new credentials."
+            }
+
+            # Only update if needed
+            if ($needsUpdate) {
+              Log "Setting Git credentials for service principal via myGitCredentials (ConfiguredConnection)..."
+              $body = @{
+                source = "ConfiguredConnection"
+                connectionId = $gitConnectionId
+              }
+
+              if ("${{ env.DEBUG }}" -eq '1') {
+                Log "PATCH body:"
+                $body | ConvertTo-Json -Depth 5 | Out-Host
+              }
+
+              $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
+              if ($r.ExitCode -ne 0){
+                $r.ErrText | Out-Host
+                Write-Host "::error::Failed to set Git credentials using ConfiguredConnection."
+                Write-Host "::error::Verify FABRIC_GIT_CONNECTION_ID is correct and the connection exists."
+                Fail "Unable to configure Git credentials for service principal."
+              }
+              
+              Log "Git credentials updated for service principal."
+              Log "Waiting 5 seconds for credentials to propagate..."
+              Start-Sleep -Seconds 5
+            }
           }
           else {
             Write-Host "##[warning]FABRIC_GIT_CONNECTION_ID is not set."
             Write-Host "##[warning]Git credentials cannot be configured. Git sync validation will be skipped."
           }
 
-          # Validate Git credentials for the service principal (fail fast)
-          # and capture status response for updateFromGit request body
+          # ============================================================================
+          # STEP 4: Validate Git Credentials and Get Current Status
+          # Verifies credentials work and retrieves commit hashes for sync operation
+          # ============================================================================
           Log "Validating Git credentials for service principal..."
           $r = Invoke-FabricApi -Method GET -Uri "$fabricResource/v1/workspaces/$workspaceId/git/status"
           if ($r.ExitCode -ne 0){
@@ -168,13 +223,16 @@ jobs:
           }
           $gitStatusResponse = $r.OutJson | ConvertFrom-Json
 
-          # Sync workspace with Git (update from Git)
+          # ============================================================================
+          # STEP 5: Sync Workspace with Git (Pull Latest Changes)
+          # Updates workspace to match the main branch in Git repository
+          # ============================================================================
           Log "Syncing workspace with Git repository..."
           $updateBody = @{
-            remoteCommitHash = $gitStatusResponse.remoteCommitHash
-            workspaceHead    = $gitStatusResponse.workspaceHead
+            remoteCommitHash = $gitStatusResponse.remoteCommitHash  # Git commit to sync to
+            workspaceHead    = $gitStatusResponse.workspaceHead     # Current workspace state
             options          = @{
-              allowOverrideItems = $true
+              allowOverrideItems = $true                            # Overwrite workspace items with Git versions
             }
           } | ConvertTo-Json -Depth 5
           
@@ -199,11 +257,14 @@ jobs:
             Log "Workspace synced successfully from Git"
           }
 
-          # Check for pending changes (uncommitted changes in workspace)
+          # ============================================================================
+          # STEP 6: Validate No Pending Changes
+          # Fails if workspace has uncommitted changes (prevents out-of-sync deployments)
+          # ============================================================================
           Log "Checking for pending changes in workspace..."
           $gitStatus = $gitStatusResponse
 
-            # Check if there are any changes that need to be committed
+            # Enumerate any uncommitted changes in the workspace
             $hasChanges = $false
             if ($gitStatus.changes -and $gitStatus.changes.Count -gt 0) {
               $hasChanges = $true
@@ -213,6 +274,7 @@ jobs:
               }
             }
 
+            # Block deployment if uncommitted changes exist
             if ($hasChanges) {
               Fail "Deployment blocked: Dev workspace has pending changes. Please commit all changes to Git before running the pipeline."
             }
@@ -222,15 +284,24 @@ jobs:
       - name: Resolve Fabric Pipeline and Stage IDs (PowerShell)
         shell: pwsh
         run: |
+          # ============================================================================
+          # Script: Resolve Fabric Deployment Pipeline and Stage IDs
+          # Purpose: Discovers and validates the Fabric Deployment Pipeline configuration
+          #          and resolves stage IDs for subsequent deployment jobs
+          # ============================================================================
+          
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
 
+          # Helper functions for logging and error handling
           function Log([string]$m){ Write-Host "[$(Get-Date -Format o)] $m" }
           function Fail([string]$m){ Write-Error $m; exit 1 }
 
+          # Enable debug tracing if DEBUG flag is set
           $DEBUG = "${{ env.DEBUG }}"
           if ($DEBUG -eq '1') { Set-PSDebug -Trace 1 }
 
+          # Verify Azure CLI context and acquire Fabric API token
           $fabricResource = "${{ env.FABRIC_RESOURCE }}"
 
           Log "Azure account context:"
@@ -262,8 +333,10 @@ jobs:
             [pscustomobject]@{ Status=$status; ExitCode=$p.ExitCode; OutJson=$out; ErrText=$err }
           }
 
-          # 1) List deployment pipelines (GET /v1/deploymentPipelines)
-          #    Ref: Microsoft Learn — List Deployment Pipelines
+          # ============================================================================
+          # STEP 1: Discover Fabric Deployment Pipeline
+          # Lists all pipelines and finds the one matching FABRIC_PIPELINE_NAME
+          # ============================================================================
           $r = Invoke-AzRestJson -Method GET -Uri "$fabricResource/v1/deploymentPipelines"
           if ($r.ExitCode -ne 0){ $r.ErrText | Out-Host; Fail "Failed listing pipelines (rc=$($r.ExitCode), http=$($r.Status))" }
           if ($r.Status -eq '401'){ Fail "Unauthorized (401). Token invalid/expired." }
@@ -279,20 +352,26 @@ jobs:
           $pipelineId = $pipeline.id
           Log "Resolved pipeline: $pipelineName [$pipelineId]"
 
-          # 2) List stages for pipeline (GET /v1/deploymentPipelines/{id}/stages)
+          # ============================================================================
+          # STEP 2: Resolve Stage IDs
+          # Gets all stages in the pipeline and resolves IDs by stage name
+          # ============================================================================
           $r2 = Invoke-AzRestJson -Method GET -Uri "$fabricResource/v1/deploymentPipelines/$pipelineId/stages"
           if ($r2.ExitCode -ne 0){ $r2.ErrText | Out-Host; Fail "Failed listing stages (rc=$($r2.ExitCode), http=$($r2.Status))" }
           $stages = ($r2.OutJson | ConvertFrom-Json).value
 
+          # Look up each stage by configured name
           $devId  = ($stages | Where-Object { $_.displayName -eq "${{ env.DEV_STAGE_NAME }}"  } | Select-Object -ExpandProperty id -First 1)
           $testId = ($stages | Where-Object { $_.displayName -eq "${{ env.TEST_STAGE_NAME }}" } | Select-Object -ExpandProperty id -First 1)
           $prodId = ($stages | Where-Object { $_.displayName -eq "${{ env.PROD_STAGE_NAME }}" } | Select-Object -ExpandProperty id -First 1)
 
+          # Verify all three stages were found
           if (-not $devId -or -not $testId -or -not $prodId){
             $r2.OutJson | Out-Host
             Fail "One or more stage IDs could not be resolved by display name."
           }
 
+          # Output resolved IDs for verification
           Log "Stage IDs:"
           Log "  ${{ env.DEV_STAGE_NAME }}:  $devId"
           Log "  ${{ env.TEST_STAGE_NAME }}: $testId"
@@ -316,12 +395,20 @@ jobs:
       - name: "Fabric deploy: Development → Test (PowerShell)"
         shell: pwsh
         run: |
+          # ============================================================================
+          # Script: Deploy from Development to Test
+          # Purpose: Promotes Fabric artifacts from Dev stage to Test stage using
+          #          Fabric Deployment Pipeline API with status polling
+          # ============================================================================
+          
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
 
+          # Helper functions for logging and error handling
           function Log([string]$m){ Write-Host "[$(Get-Date -Format o)] $m" }
           function Fail([string]$m){ Write-Error $m; exit 1 }
 
+          # Acquire access token for Fabric API
           $fabricResource = "${{ env.FABRIC_RESOURCE }}"
           $token = az account get-access-token --resource $fabricResource --query accessToken -o tsv 2>&1
           if ([string]::IsNullOrWhiteSpace($token)){ Fail "Failed to acquire Fabric token." }
@@ -347,7 +434,10 @@ jobs:
             [pscustomobject]@{ Status=$status; ExitCode=$p.ExitCode; OutJson=$out; ErrText=$err }
           }
 
-          # Discover pipeline and stage IDs
+          # ============================================================================
+          # STEP 1: Discover Pipeline and Stage Configuration
+          # Re-discovers pipeline and stage IDs (not passed between jobs)
+          # ============================================================================
           Log "Discovering Fabric pipeline and stage IDs..."
           $r = Invoke-AzRestJson -Method GET -Uri "$fabricResource/v1/deploymentPipelines"
           if ($r.ExitCode -ne 0){ $r.ErrText | Out-Host; Fail "Failed listing pipelines" }
@@ -368,12 +458,15 @@ jobs:
           if (-not $devId -or -not $testId){ Fail "Could not resolve source/target stage IDs" }
           Log "Pipeline: $pipelineId, Dev: $devId, Test: $testId"
 
-          # Deploy from Dev to Test
+          # ============================================================================
+          # STEP 2: Trigger Deployment from Development to Test
+          # Initiates async deployment operation via Fabric API
+          # ============================================================================
           $deployUri = "$fabricResource/v1/deploymentPipelines/$pipelineId/deploy"
           $body = @{
-            sourceStageId = $devId
-            targetStageId = $testId
-            note = "GH Dev→Test"
+            sourceStageId = $devId    # Development stage
+            targetStageId = $testId   # Test stage
+            note = "GH Dev→Test"       # Deployment note for auditing
           } | ConvertTo-Json -Depth 5
 
           try {
@@ -460,16 +553,25 @@ jobs:
       - name: "Fabric deploy: Test → Production (PowerShell)"
         shell: pwsh
         run: |
+          # ============================================================================
+          # Script: Deploy from Test to Production
+          # Purpose: Promotes Fabric artifacts from Test stage to Production stage using
+          #          Fabric Deployment Pipeline API with status polling
+          # ============================================================================
+          
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'
 
+          # Helper functions for logging and error handling
           function Log([string]$m){ Write-Host "[$(Get-Date -Format o)] $m" }
           function Fail([string]$m){ Write-Error $m; exit 1 }
 
+          # Acquire access token for Fabric API
           $fabricResource = "${{ env.FABRIC_RESOURCE }}"
           $token = az account get-access-token --resource $fabricResource --query accessToken -o tsv 2>&1
           if ([string]::IsNullOrWhiteSpace($token)){ Fail "Failed to acquire Fabric token." }
 
+          # Helper function to invoke Fabric REST API using Azure CLI
           function Invoke-AzRestJson([string]$Method,[string]$Uri,[string]$BodyJson){
             $headers = @("Authorization=Bearer $token","Content-Type=application/json")
             $cliArgs = @('rest', '--method', $Method, '--uri', $Uri, '--headers') + $headers
