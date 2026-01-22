@@ -17,7 +17,6 @@
 # CELL ********************
 
 
-# test Comment
 import sempy_labs as labs
 import sempy.fabric as fabric
 from sempy_labs.tom import connect_semantic_model
