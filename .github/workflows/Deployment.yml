@@ -6,6 +6,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   FABRIC_PIPELINE_NAME: 'Git Deployment'   # exact display name in Fabric
   DEV_WORKSPACE_ID: ''   # Dev workspace ID (GUID) - leave empty to look up by name
