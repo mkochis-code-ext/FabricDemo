@@ -145,17 +145,14 @@ jobs:
           Log "Validating Git credentials for service principal..."
           $r = Invoke-FabricApi -Method GET -Uri "$fabricResource/v1/workspaces/$workspaceId/git/status"
           if ($r.ExitCode -ne 0){
-            if ($r.ErrText -like '*GitCredentialsNotConfigured*') {
-              $r.ErrText | Out-Host
-              Write-Host "::warning::Git credentials are not configured for the service principal. Skipping Git sync and pending-change checks."
-              $skipGitChecks = $true
-            }
             $r.ErrText | Out-Host
-            if (-not $skipGitChecks) { Fail "Failed to validate Git credentials" }
-          }
-          if ($skipGitChecks) {
-            Log "Skipping Git sync and pending-change checks due to missing Git credentials."
-            return
+            if ($r.ErrText -like '*GitCredentialsNotConfigured*') {
+              Write-Host "##[error]Git credentials are not configured for the service principal."
+              Write-Host "##[error]Please configure FABRIC_GIT_PAT and FABRIC_GIT_USERNAME secrets."
+              Write-Host "##[error]Ensure the service principal has Workspace Admin or Contributor role."
+              Fail "Deployment blocked: Git credentials not configured. Cannot verify workspace sync status or pending changes."
+            }
+            Fail "Failed to validate Git credentials"
           }
           $gitStatusResponse = $r.OutJson | ConvertFrom-Json
 
@@ -171,18 +168,18 @@ jobs:
           
           $r = Invoke-FabricApi -Method POST -Uri "$fabricResource/v1/workspaces/$workspaceId/git/updateFromGit" -BodyJson $updateBody
           if ($r.ExitCode -ne 0){
+            $r.ErrText | Out-Host
             # Check for Git credentials not configured error
             if ($r.ErrText -like '*GitCredentialsNotConfigured*') {
-              Write-Host "##[warning]Unable to sync workspace - Git credentials not configured for API caller."
-              Write-Host "##[warning]The workspace is connected to Git, but the service principal needs additional permissions."
-              Write-Host "##[warning]Grant the service principal access with: Workspace Admin or Contributor role"
-              Write-Host "##[warning]Proceeding with pending changes check only..."
+              Write-Host "##[error]Unable to sync workspace - Git credentials not configured for API caller."
+              Write-Host "##[error]The workspace is connected to Git, but the service principal needs additional permissions."
+              Write-Host "##[error]Grant the service principal: Workspace Admin or Contributor role"
+              Fail "Deployment blocked: Cannot sync workspace with Git. Verify service principal has proper permissions."
             }
             # Check if it's just "no changes" which is acceptable
             elseif ($r.ErrText -like '*NoChangesToPull*' -or $r.Status -eq '400') {
               Log "Workspace is already up to date with Git"
             } else {
-              $r.ErrText | Out-Host
               Fail "Failed to sync workspace from Git (Status: $($r.Status))"
             }
           }
@@ -371,8 +368,11 @@ jobs:
             $resp = Invoke-WebRequest -Method Post -Uri $deployUri -Headers @{ Authorization = "Bearer $token"; 'Content-Type'='application/json'} -Body $body -ErrorAction Stop
             Write-Host "HTTP $($resp.StatusCode)"
             $operationId = $resp.Headers['x-ms-operation-id']
-            $retryAfter = $resp.Headers['Retry-After']
-            $locationUrl = $resp.Headers['Location']
+            $retryAfterRaw = $resp.Headers['Retry-After']
+            $locationUrlRaw = $resp.Headers['Location']
+            # Handle headers that may be arrays
+            $retryAfter = if ($retryAfterRaw -is [array]) { $retryAfterRaw[0] } else { $retryAfterRaw }
+            $locationUrl = if ($locationUrlRaw -is [array]) { $locationUrlRaw[0] } else { $locationUrlRaw }
             Write-Host "x-ms-operation-id: $operationId"
             Write-Host "Retry-After: $retryAfter"
             Write-Host "Location: $locationUrl"
@@ -512,8 +512,11 @@ jobs:
             $resp = Invoke-WebRequest -Method Post -Uri $deployUri -Headers @{ Authorization = "Bearer $token"; 'Content-Type'='application/json'} -Body $body -ErrorAction Stop
             Write-Host "HTTP $($resp.StatusCode)"
             $operationId = $resp.Headers['x-ms-operation-id']
-            $retryAfter = $resp.Headers['Retry-After']
-            $locationUrl = $resp.Headers['Location']
+            $retryAfterRaw = $resp.Headers['Retry-After']
+            $locationUrlRaw = $resp.Headers['Location']
+            # Handle headers that may be arrays
+            $retryAfter = if ($retryAfterRaw -is [array]) { $retryAfterRaw[0] } else { $retryAfterRaw }
+            $locationUrl = if ($locationUrlRaw -is [array]) { $locationUrlRaw[0] } else { $locationUrlRaw }
             Write-Host "x-ms-operation-id: $operationId"
             Write-Host "Retry-After: $retryAfter"
             Write-Host "Location: $locationUrl"
