@@ -1,20 +1,260 @@
-# Introduction 
-TODO: Give a short introduction of your project. Let this section explain the objectives or the motivation behind this project. 
+# Fabric Deployment Pipeline
 
-# Getting Started
-TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
-1.	Installation process
-2.	Software dependencies
-3.	Latest releases
-4.	API references
+This document describes the automated deployment pipeline for Microsoft Fabric workspaces using GitHub Actions and Fabric Deployment Pipelines.
 
-# Build and Test
-TODO: Describe and show how to build your code and run the tests. 
+## Overview
 
-# Contribute
-TODO: Explain how other users and developers can contribute to make your code better. 
+This pipeline automates the promotion of Fabric artifacts from Development through Test to Production environments using a Git-based workflow. The pipeline ensures that all changes are version-controlled, validated, and systematically deployed across environments with appropriate approvals.
 
-If you want to learn more about creating good readme files then refer the following [guidelines](https://docs.microsoft.com/en-us/azure/devops/repos/git/create-a-readme?view=azure-devops). You can also seek inspiration from the below readme files:
-- [ASP.NET Core](https://github.com/aspnet/Home)
-- [Visual Studio Code](https://github.com/Microsoft/vscode)
-- [Chakra Core](https://github.com/Microsoft/ChakraCore)
+## Architecture
+
+### Git Integration
+- **Development Workspace (`GIT-DEV`)**: The only workspace connected to Git. All development changes are committed and synchronized through this workspace.
+- **Test Workspace**: Updated via Fabric Deployment Pipeline (not directly connected to Git)
+- **Production Workspace**: Updated via Fabric Deployment Pipeline (not directly connected to Git)
+
+### Deployment Flow
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Developer Workflow (Git)                                       │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Create Feature Branch                                       │
+│  2. Make Changes in Fabric Workspace                            │
+│  3. Commit to Feature Branch                                    │
+│  4. Create Pull Request                                         │
+│  5. Merge to Main Branch                                        │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                    [Triggers GitHub Actions]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  STAGE 1: Development                                           │
+│  ───────────────────────────────────────────────────────────    │
+│  ✓ Sync GIT-DEV workspace with main branch                     │
+│  ✓ Validate no uncommitted changes                             │
+│  ✓ Resolve Fabric Pipeline IDs                                 │
+│                                                                 │
+│  [Requires: Fabric-Development approval]                        │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                     [Fabric Deployment API]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  STAGE 2: Test                                                  │
+│  ───────────────────────────────────────────────────────────    │
+│  ✓ Deploy Development → Test                                   │
+│  ✓ Poll deployment status until complete                       │
+│                                                                 │
+│  [Requires: Fabric-Test approval]                               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                     [Fabric Deployment API]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  STAGE 3: Production                                            │
+│  ───────────────────────────────────────────────────────────    │
+│  ✓ Deploy Test → Production                                    │
+│  ✓ Poll deployment status until complete                       │
+│                                                                 │
+│  [Requires: Fabric-Production approval]                         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+                        ✅ COMPLETE
+```
+
+## Development Workflow
+
+### 1. Create a Feature Branch
+Developers create a new Git branch to work on their changes:
+
+```bash
+git checkout -b feature/my-new-feature
+```
+
+### 2. Work in a Development Workspace
+- Create or use a Fabric workspace for development
+- Connect the workspace to your feature branch in Git
+- Make changes to Fabric artifacts (notebooks, semantic models, reports, etc.)
+- Test your changes in the development workspace
+
+### 3. Commit Changes to Git
+From within the Fabric workspace:
+- Commit your changes to the feature branch
+- Add meaningful commit messages describing the changes
+- Ensure all artifacts are properly committed
+
+### 4. Create a Pull Request
+In GitHub:
+- Create a pull request from your feature branch to `main`
+- Add reviewers to review your changes
+- Address any review comments
+- Ensure all required checks pass
+
+### 5. Merge to Main
+Once approved:
+- Merge the pull request to the `main` branch
+- This automatically triggers the deployment pipeline
+
+## Automated Deployment Pipeline
+
+### Stage 1: Development (Automatic)
+**Trigger**: Push to `main` branch or manual workflow dispatch
+
+**Actions**:
+1. Syncs the `GIT-DEV` workspace with the latest code from the `main` branch
+2. Validates that the workspace has no uncommitted changes
+3. Ensures the workspace is in sync with Git before proceeding
+4. Resolves Fabric Deployment Pipeline and Stage IDs
+
+**Validation**:
+- Git connection status check
+- Git credentials configuration (for service principal)
+- Workspace sync verification
+- Pending changes detection (fails if uncommitted changes exist)
+
+**Approval**: Requires `Fabric-Development` environment approval (configured in GitHub)
+
+### Stage 2: Test (Approval Required)
+**Trigger**: Successful completion of Development stage + environment approval
+
+**Actions**:
+1. Deploys artifacts from Development stage to Test stage using Fabric Deployment Pipeline API
+2. Polls deployment status until completion
+3. Validates successful deployment
+
+**Approval**: Requires `Fabric-Test` environment approval (configured in GitHub)
+
+**Note**: If there are no changes between Development and Test, the deployment is skipped with a warning.
+
+### Stage 3: Production (Approval Required)
+**Trigger**: Successful completion of Test stage + environment approval
+
+**Actions**:
+1. Deploys artifacts from Test stage to Production stage using Fabric Deployment Pipeline API
+2. Polls deployment status until completion
+3. Validates successful deployment
+
+**Approval**: Requires `Fabric-Production` environment approval (configured in GitHub)
+
+**Note**: If there are no changes between Test and Production, the deployment is skipped with a warning.
+
+## Prerequisites
+
+### GitHub Secrets Configuration
+The following secrets must be configured in your GitHub repository:
+
+**Azure Service Principal Authentication**:
+- `AZURE_CLIENT_ID`: Service principal application (client) ID
+- `AZURE_CLIENT_SECRET`: Service principal client secret
+- `AZURE_TENANT_ID`: Azure Active Directory tenant ID
+- `AZURE_SUBSCRIPTION_ID`: Azure subscription ID
+
+**Fabric Git Integration**:
+- `FABRIC_GIT_CONNECTION_ID`: Pre-configured Git connection ID (recommended for service principals)
+
+### GitHub Environments
+Create the following environments in GitHub (Settings → Environments):
+- `Fabric-Development`: Configure required reviewers for Development approval
+- `Fabric-Test`: Configure required reviewers for Test approval
+- `Fabric-Production`: Configure required reviewers for Production approval
+
+### Service Principal Setup
+The service principal must be granted proper permissions in Fabric:
+
+**Step 1: Add Service Principal to Workspaces**
+- Navigate to each workspace (Development, Test, Production) in Fabric
+- Go to Workspace Settings → Manage Access
+- Add the service principal as an **Admin**
+- Repeat for all three workspaces
+
+**Step 2: Add Service Principal to Deployment Pipeline**
+- Navigate to the Fabric Deployment Pipeline in Fabric
+- Go to Pipeline Settings → Manage Access
+- Add the service principal as an **Admin**
+- This allows the pipeline to trigger deployments between stages
+
+**Step 3: Azure Subscription Permissions**
+- Ensure the service principal has the ability to acquire access tokens for the Fabric API resource (`https://api.fabric.microsoft.com`)
+
+### Fabric Configuration
+1. **Create Fabric Deployment Pipeline**: Named `Git Deployment` (or update `FABRIC_PIPELINE_NAME` in workflow)
+2. **Configure Stages**: Three stages named exactly:
+   - `Development`
+   - `Test`
+   - `Production`
+3. **Assign Workspaces**: Assign the appropriate workspace to each stage
+4. **Git Connection**: Connect only the Development workspace (`GIT-DEV`) to your GitHub repository
+
+## Key Features
+
+### Git Validation
+- Ensures the Development workspace is synchronized with Git before deployment
+- Fails the pipeline if there are uncommitted changes in the workspace
+- Prevents out-of-sync deployments
+
+### Long Polling
+- Test and Production stages poll deployment status until completion
+- Prevents premature progression to next stage
+- Provides real-time deployment status updates
+
+### Error Handling
+- Graceful handling of "no changes to deploy" scenarios
+- Detailed error messages for troubleshooting
+- Git credentials configuration with fallback options
+
+### Debug Mode
+Set `DEBUG: '1'` in the workflow file to enable verbose logging for troubleshooting.
+
+## Monitoring and Troubleshooting
+
+### GitHub Actions UI
+- Navigate to Actions tab in GitHub repository
+- View workflow runs, logs, and approval status
+- Monitor deployment progress in real-time
+
+### Common Issues
+
+**Git Credentials Not Configured**:
+- Ensure `FABRIC_GIT_CONNECTION_ID` secret is set with valid connection ID
+- Verify service principal has proper workspace permissions
+- Check Git connection exists in Fabric workspace settings
+
+**Deployment Fails**:
+- Review deployment pipeline configuration in Fabric
+- Verify workspace assignments to pipeline stages
+- Check service principal permissions on target workspaces
+
+**No Items to Deploy**:
+- This is expected when stages are already in sync
+- Pipeline continues with warning message
+
+## Best Practices
+
+1. **Always work in feature branches**: Never commit directly to `main`
+2. **Test thoroughly before merging**: Validate changes in your development workspace
+3. **Use meaningful commit messages**: Helps track changes across environments
+4. **Review pull requests carefully**: Ensure changes are reviewed before deployment
+5. **Monitor deployment logs**: Check GitHub Actions logs for any warnings or errors
+6. **Keep workspaces in sync**: Ensure Development workspace commits all changes regularly
+
+## Pipeline Maintenance
+
+### Updating Configuration
+Key configuration values are defined in the `env` section of the workflow file:
+- `FABRIC_PIPELINE_NAME`: Name of your Fabric Deployment Pipeline
+- `DEV_WORKSPACE_NAME`: Name of your Development workspace
+- `DEV_STAGE_NAME`, `TEST_STAGE_NAME`, `PROD_STAGE_NAME`: Stage names in Fabric pipeline
+
+### Modifying Approval Flow
+Edit environment protection rules in GitHub Settings → Environments to change:
+- Required reviewers
+- Wait timer before deployment
+- Environment secrets
+
+## Support
+
+For issues or questions:
+1. Review GitHub Actions workflow logs
+2. Check Fabric workspace and deployment pipeline status
+3. Verify all prerequisites are configured correctly
+4. Consult Fabric API documentation for API-related issues
