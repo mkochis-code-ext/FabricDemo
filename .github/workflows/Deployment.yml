@@ -120,10 +120,10 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($gitPat)) {
             Log "Setting Git credentials for service principal via myGitCredentials..."
             $body = @{
+              source               = 'GitHub'
               personalAccessToken = $gitPat
             }
             if ($gitConnectionId) { $body.gitConnectionId = $gitConnectionId }
-            if ($gitProviderType) { $body.gitProviderType = $gitProviderType }
             if (-not [string]::IsNullOrWhiteSpace($gitUsername)) { $body.userName = $gitUsername }
 
             $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
@@ -151,6 +151,10 @@ jobs:
             }
             $r.ErrText | Out-Host
             if (-not $skipGitChecks) { Fail "Failed to validate Git credentials" }
+          }
+          if ($skipGitChecks) {
+            Log "Skipping Git sync and pending-change checks due to missing Git credentials."
+            return
           }
           $gitStatusResponse = $r.OutJson | ConvertFrom-Json
 
