@@ -18,7 +18,7 @@ env:
   PROD_STAGE_NAME: 'Production'
   FABRIC_RESOURCE: 'https://api.fabric.microsoft.com'
   # Optional: set DEBUG to 1 in GitHub Actions env/vars to enable verbose logs
-  DEBUG: '0'
+  DEBUG: '1'
   AZURE_CREDENTIALS: >-
     {"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}
   FABRIC_GIT_PAT: ${{ secrets.FABRIC_GIT_PAT }}
