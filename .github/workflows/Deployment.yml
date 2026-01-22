@@ -127,6 +127,13 @@ jobs:
             if ($gitConnectionId) { $body.gitConnectionId = $gitConnectionId }
             if (-not [string]::IsNullOrWhiteSpace($gitUsername)) { $body.userName = $gitUsername }
 
+            if ("${{ env.DEBUG }}" -eq '1') {
+              Log "PATCH body (PAT redacted):"
+              $debugBody = $body.Clone()
+              $debugBody.personalAccessToken = "***"
+              $debugBody | ConvertTo-Json -Depth 5 | Out-Host
+            }
+
             $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
             if ($r.ExitCode -ne 0){
               $r.ErrText | Out-Host
@@ -134,6 +141,8 @@ jobs:
             }
             else {
               Log "Git credentials updated for service principal."
+              Log "Waiting 5 seconds for credentials to propagate..."
+              Start-Sleep -Seconds 5
             }
           }
           else {
