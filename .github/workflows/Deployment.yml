@@ -253,7 +253,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Fabric deploy: Development → Test (PowerShell)
+      - name: "Fabric deploy: Development → Test (PowerShell)"
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -360,7 +360,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Fabric deploy: Test → Production (PowerShell)
+      - name: "Fabric deploy: Test → Production (PowerShell)"
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
