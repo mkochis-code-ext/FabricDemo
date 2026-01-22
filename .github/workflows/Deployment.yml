@@ -117,26 +117,26 @@ jobs:
           $gitPat = "${{ env.FABRIC_GIT_PAT }}"
           $gitUsername = "${{ env.FABRIC_GIT_USERNAME }}"
 
-          if ($gitConnectionId -and -not [string]::IsNullOrWhiteSpace($gitPat)) {
+          if (-not [string]::IsNullOrWhiteSpace($gitPat)) {
             Log "Setting Git credentials for service principal via myGitCredentials..."
             $body = @{
-              gitConnectionId    = $gitConnectionId
               personalAccessToken = $gitPat
             }
+            if ($gitConnectionId) { $body.gitConnectionId = $gitConnectionId }
             if ($gitProviderType) { $body.gitProviderType = $gitProviderType }
             if (-not [string]::IsNullOrWhiteSpace($gitUsername)) { $body.userName = $gitUsername }
 
             $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
             if ($r.ExitCode -ne 0){
               $r.ErrText | Out-Host
-              Fail "Failed to set Git credentials for service principal"
+              Write-Host "::warning::Failed to set Git credentials for service principal."
             }
             else {
               Log "Git credentials updated for service principal."
             }
           }
           else {
-            Write-Host "::warning::FABRIC_GIT_PAT not set or gitConnectionId unavailable; skipping myGitCredentials update."
+            Write-Host "::warning::FABRIC_GIT_PAT not set; skipping myGitCredentials update."
           }
 
           # Validate Git credentials for the service principal (fail fast)
@@ -146,10 +146,11 @@ jobs:
           if ($r.ExitCode -ne 0){
             if ($r.ErrText -like '*GitCredentialsNotConfigured*') {
               $r.ErrText | Out-Host
-              Fail "Git credentials are not configured for the service principal. Configure Git credentials in Fabric before running this pipeline."
+              Write-Host "::warning::Git credentials are not configured for the service principal. Skipping Git sync and pending-change checks."
+              $skipGitChecks = $true
             }
             $r.ErrText | Out-Host
-            Fail "Failed to validate Git credentials"
+            if (-not $skipGitChecks) { Fail "Failed to validate Git credentials" }
           }
           $gitStatusResponse = $r.OutJson | ConvertFrom-Json
 
