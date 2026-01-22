@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
 
 env:
-  FABRIC_PIPELINE_NAME: 'DevOps Deployment'   # exact display name in Fabric
+  FABRIC_PIPELINE_NAME: 'Git Deployment'   # exact display name in Fabric
   DEV_WORKSPACE_ID: ''   # Dev workspace ID (GUID) - leave empty to look up by name
-  DEV_WORKSPACE_NAME: 'DEVOPS-DEV'   # Dev workspace name (used if ID is empty)
+  DEV_WORKSPACE_NAME: 'Git-DEV'   # Dev workspace name (used if ID is empty)
   DEV_STAGE_NAME: 'Development'
   TEST_STAGE_NAME: 'Test'
   PROD_STAGE_NAME: 'Production'
