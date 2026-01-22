@@ -94,6 +94,14 @@ jobs:
           }
           $gitConn = $r.OutJson | ConvertFrom-Json
           Log "Git connected to: $($gitConn.gitProviderDetails.organizationName)/$($gitConn.gitProviderDetails.projectName)/$($gitConn.gitProviderDetails.repositoryName)"
+          Log "Git connection response keys: $([string]::Join(', ', $gitConn.PSObject.Properties.Name))"
+          if ($gitConn.gitProviderDetails) {
+            Log "Git provider details keys: $([string]::Join(', ', $gitConn.gitProviderDetails.PSObject.Properties.Name))"
+          }
+          if ("${{ env.DEBUG }}" -eq '1') {
+            Log "Git connection response (debug):"
+            $gitConn | ConvertTo-Json -Depth 6 | Out-Host
+          }
 
           # Optionally configure Git credentials for service principal
           $gitConnectionId = $null
@@ -104,6 +112,7 @@ jobs:
           $gitProviderType = $null
           if ($gitConn.PSObject.Properties.Name -contains 'gitProviderType') { $gitProviderType = $gitConn.gitProviderType }
           elseif ($gitConn.gitProviderDetails -and $gitConn.gitProviderDetails.PSObject.Properties.Name -contains 'gitProviderType') { $gitProviderType = $gitConn.gitProviderDetails.gitProviderType }
+          if (-not $gitProviderType) { $gitProviderType = 'GitHub' }
 
           $gitPat = "${{ env.FABRIC_GIT_PAT }}"
           $gitUsername = "${{ env.FABRIC_GIT_USERNAME }}"
