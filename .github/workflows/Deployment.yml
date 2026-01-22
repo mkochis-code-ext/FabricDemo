@@ -279,7 +279,7 @@ jobs:
               Fail "Deployment blocked: Dev workspace has pending changes. Please commit all changes to Git before running the pipeline."
             }
 
-            Log "✓ Workspace is in sync with Git and has no pending changes"
+            Log "Workspace is in sync with Git and has no pending changes"
 
       - name: Resolve Fabric Pipeline and Stage IDs (PowerShell)
         shell: pwsh
@@ -287,7 +287,6 @@ jobs:
           # ============================================================================
           # Script: Resolve Fabric Deployment Pipeline and Stage IDs
           # Purpose: Discovers and validates the Fabric Deployment Pipeline configuration
-          #          and resolves stage IDs for subsequent deployment jobs
           # ============================================================================
           
           $ErrorActionPreference = 'Stop'
