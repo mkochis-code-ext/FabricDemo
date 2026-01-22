@@ -130,7 +130,7 @@ jobs:
             Log "Setting Git credentials for service principal via myGitCredentials (ConfiguredConnection)..."
             $body = @{
               source = "ConfiguredConnection"
-              gitConnectionId = $gitConnectionId
+              connectionId = $gitConnectionId
             }
 
             if ("${{ env.DEBUG }}" -eq '1') {
