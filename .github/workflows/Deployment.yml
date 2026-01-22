@@ -117,14 +117,20 @@ jobs:
 
           $gitPat = "${{ env.FABRIC_GIT_PAT }}"
           $gitUsername = "${{ env.FABRIC_GIT_USERNAME }}"
+          
+          # Default username to git owner if not provided
+          if ([string]::IsNullOrWhiteSpace($gitUsername) -and $gitConn.gitProviderDetails.ownerName) {
+            $gitUsername = $gitConn.gitProviderDetails.ownerName
+            Log "Using Git owner as username: $gitUsername"
+          }
 
           if (-not [string]::IsNullOrWhiteSpace($gitPat)) {
             Log "Setting Git credentials for service principal via myGitCredentials..."
             $body = @{
-              source               = 0
               personalAccessToken = $gitPat
             }
-            if ($gitConnectionId) { $body.gitConnectionId = $gitConnectionId }
+            # Try with source=0 (GitHub)
+            $body.source = 0
             if (-not [string]::IsNullOrWhiteSpace($gitUsername)) { $body.userName = $gitUsername }
 
             if ("${{ env.DEBUG }}" -eq '1') {
@@ -137,16 +143,24 @@ jobs:
             $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
             if ($r.ExitCode -ne 0){
               $r.ErrText | Out-Host
-              Write-Host "::warning::Failed to set Git credentials for service principal."
+              # Retry without source field
+              Log "Retrying without source field..."
+              $body.Remove('source')
+              $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
+              if ($r.ExitCode -ne 0){
+                $r.ErrText | Out-Host
+                Write-Host "::error::Failed to set Git credentials. Verify PAT has 'repo' scope and is valid."
+                Fail "Unable to configure Git credentials for service principal."
+              }
             }
-            else {
-              Log "Git credentials updated for service principal."
-              Log "Waiting 5 seconds for credentials to propagate..."
-              Start-Sleep -Seconds 5
-            }
+            
+            Log "Git credentials updated for service principal."
+            Log "Waiting 5 seconds for credentials to propagate..."
+            Start-Sleep -Seconds 5
           }
           else {
-            Write-Host "::warning::FABRIC_GIT_PAT not set; skipping myGitCredentials update."
+            Write-Host "##[error]FABRIC_GIT_PAT not set."
+            Fail "Deployment blocked: FABRIC_GIT_PAT secret is required."
           }
 
           # Validate Git credentials for the service principal (fail fast)
