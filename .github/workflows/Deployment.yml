@@ -23,6 +23,7 @@ env:
     {"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}"}
   FABRIC_GIT_PAT: ${{ secrets.FABRIC_GIT_PAT }}
   FABRIC_GIT_USERNAME: ${{ secrets.FABRIC_GIT_USERNAME }}
+  FABRIC_GIT_SOURCE: '1'
 
 jobs:
   development:
@@ -119,8 +120,11 @@ jobs:
 
           if (-not [string]::IsNullOrWhiteSpace($gitPat)) {
             Log "Setting Git credentials for service principal via myGitCredentials..."
+            $sourceValue = "${{ env.FABRIC_GIT_SOURCE }}"
+            if ([string]::IsNullOrWhiteSpace($sourceValue)) { $sourceValue = 'GitHub' }
+
             $body = @{
-              source               = 'GitHub'
+              source               = $sourceValue
               personalAccessToken = $gitPat
             }
             if ($gitConnectionId) { $body.gitConnectionId = $gitConnectionId }
@@ -129,7 +133,15 @@ jobs:
             $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
             if ($r.ExitCode -ne 0){
               $r.ErrText | Out-Host
-              Write-Host "::warning::Failed to set Git credentials for service principal."
+              if ($r.ErrText -like '*Failed to convert value*') {
+                Write-Host "::warning::Source value not accepted; retrying with numeric source=1."
+                $body.source = 1
+                $r = Invoke-FabricApi -Method PATCH -Uri "$fabricResource/v1/workspaces/$workspaceId/git/myGitCredentials" -BodyJson ($body | ConvertTo-Json -Depth 5)
+              }
+              if ($r.ExitCode -ne 0){
+                $r.ErrText | Out-Host
+                Write-Host "::warning::Failed to set Git credentials for service principal."
+              }
             }
             else {
               Log "Git credentials updated for service principal."
