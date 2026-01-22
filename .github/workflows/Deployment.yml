@@ -370,10 +370,47 @@ jobs:
           try {
             $resp = Invoke-WebRequest -Method Post -Uri $deployUri -Headers @{ Authorization = "Bearer $token"; 'Content-Type'='application/json'} -Body $body -ErrorAction Stop
             Write-Host "HTTP $($resp.StatusCode)"
-            Write-Host "x-ms-operation-id: $($resp.Headers['x-ms-operation-id'])"
-            Write-Host "Retry-After: $($resp.Headers['Retry-After'])"
-            Write-Host "Location: $($resp.Headers['Location'])"
-            # (Optional) You can poll $resp.Headers['Location'] to wait for completion if you want.
+            $operationId = $resp.Headers['x-ms-operation-id']
+            $retryAfter = $resp.Headers['Retry-After']
+            $locationUrl = $resp.Headers['Location']
+            Write-Host "x-ms-operation-id: $operationId"
+            Write-Host "Retry-After: $retryAfter"
+            Write-Host "Location: $locationUrl"
+
+            # Poll for deployment completion
+            if ($locationUrl) {
+              Log "Polling deployment status..."
+              $maxAttempts = 60
+              $attempt = 0
+              $sleepSeconds = if ($retryAfter) { [int]$retryAfter } else { 10 }
+              
+              while ($attempt -lt $maxAttempts) {
+                Start-Sleep -Seconds $sleepSeconds
+                $attempt++
+                
+                $statusResp = Invoke-AzRestJson -Method GET -Uri $locationUrl
+                if ($statusResp.ExitCode -eq 0 -and $statusResp.OutJson) {
+                  $status = ($statusResp.OutJson | ConvertFrom-Json)
+                  Log "Deployment status: $($status.status) (attempt $attempt/$maxAttempts)"
+                  
+                  if ($status.status -eq 'Succeeded') {
+                    Log "✓ Deployment completed successfully!"
+                    break
+                  }
+                  elseif ($status.status -eq 'Failed') {
+                    $statusResp.OutJson | Out-Host
+                    Fail "Deployment failed. Check the operation details above."
+                  }
+                }
+                else {
+                  Log "Waiting for deployment to complete..."
+                }
+              }
+              
+              if ($attempt -ge $maxAttempts) {
+                Fail "Deployment polling timed out after $maxAttempts attempts."
+              }
+            }
           }
           catch {
             $errorDetails = $_.ErrorDetails.Message
@@ -474,9 +511,47 @@ jobs:
           try {
             $resp = Invoke-WebRequest -Method Post -Uri $deployUri -Headers @{ Authorization = "Bearer $token"; 'Content-Type'='application/json'} -Body $body -ErrorAction Stop
             Write-Host "HTTP $($resp.StatusCode)"
-            Write-Host "x-ms-operation-id: $($resp.Headers['x-ms-operation-id'])"
-            Write-Host "Retry-After: $($resp.Headers['Retry-After'])"
-            Write-Host "Location: $($resp.Headers['Location'])"
+            $operationId = $resp.Headers['x-ms-operation-id']
+            $retryAfter = $resp.Headers['Retry-After']
+            $locationUrl = $resp.Headers['Location']
+            Write-Host "x-ms-operation-id: $operationId"
+            Write-Host "Retry-After: $retryAfter"
+            Write-Host "Location: $locationUrl"
+
+            # Poll for deployment completion
+            if ($locationUrl) {
+              Log "Polling deployment status..."
+              $maxAttempts = 60
+              $attempt = 0
+              $sleepSeconds = if ($retryAfter) { [int]$retryAfter } else { 10 }
+              
+              while ($attempt -lt $maxAttempts) {
+                Start-Sleep -Seconds $sleepSeconds
+                $attempt++
+                
+                $statusResp = Invoke-AzRestJson -Method GET -Uri $locationUrl
+                if ($statusResp.ExitCode -eq 0 -and $statusResp.OutJson) {
+                  $status = ($statusResp.OutJson | ConvertFrom-Json)
+                  Log "Deployment status: $($status.status) (attempt $attempt/$maxAttempts)"
+                  
+                  if ($status.status -eq 'Succeeded') {
+                    Log "✓ Deployment completed successfully!"
+                    break
+                  }
+                  elseif ($status.status -eq 'Failed') {
+                    $statusResp.OutJson | Out-Host
+                    Fail "Deployment failed. Check the operation details above."
+                  }
+                }
+                else {
+                  Log "Waiting for deployment to complete..."
+                }
+              }
+              
+              if ($attempt -ge $maxAttempts) {
+                Fail "Deployment polling timed out after $maxAttempts attempts."
+              }
+            }
           }
           catch {
             $errorDetails = $_.ErrorDetails.Message
