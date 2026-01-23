@@ -251,6 +251,50 @@ Edit environment protection rules in GitHub Settings → Environments to change:
 - Wait timer before deployment
 - Environment secrets
 
+## Fabric REST API Endpoints
+
+This pipeline uses the following Microsoft Fabric REST API endpoints. All endpoints are called using the base URL `https://api.fabric.microsoft.com`.
+
+### Workspace APIs
+
+| Endpoint | Method | Purpose | Documentation |
+|----------|--------|---------|---------------|
+| `/v1/workspaces` | GET | List all workspaces to resolve workspace ID by name | [List Workspaces](https://learn.microsoft.com/en-us/rest/api/fabric/core/workspaces/list-workspaces) |
+
+### Git Integration APIs
+
+| Endpoint | Method | Purpose | Documentation |
+|----------|--------|---------|---------------|
+| `/v1/workspaces/{workspaceId}/git/connection` | GET | Get Git connection details for a workspace | [Get Git Connection](https://learn.microsoft.com/en-us/rest/api/fabric/core/git/get-connection) |
+| `/v1/workspaces/{workspaceId}/git/myGitCredentials` | GET | Get current Git credentials configuration | [Get Git Credentials](https://learn.microsoft.com/en-us/rest/api/fabric/core/git/get-git-credentials) |
+| `/v1/workspaces/{workspaceId}/git/myGitCredentials` | PUT | Configure Git credentials for service principal access | [Update Git Credentials](https://learn.microsoft.com/en-us/rest/api/fabric/core/git/update-git-credentials) |
+| `/v1/workspaces/{workspaceId}/git/status` | GET | Get Git sync status and pending changes | [Get Git Status](https://learn.microsoft.com/en-us/rest/api/fabric/core/git/get-status) |
+| `/v1/workspaces/{workspaceId}/git/updateFromGit` | POST | Sync workspace with Git repository (pull changes) | [Update From Git](https://learn.microsoft.com/en-us/rest/api/fabric/core/git/update-from-git) |
+
+### Deployment Pipeline APIs
+
+| Endpoint | Method | Purpose | Documentation |
+|----------|--------|---------|---------------|
+| `/v1/deploymentPipelines` | GET | List all deployment pipelines to resolve pipeline ID | [List Deployment Pipelines](https://learn.microsoft.com/en-us/rest/api/fabric/core/deployment-pipelines/list-deployment-pipelines) |
+| `/v1/deploymentPipelines/{pipelineId}/stages` | GET | List stages in a deployment pipeline | [List Deployment Pipeline Stages](https://learn.microsoft.com/en-us/rest/api/fabric/core/deployment-pipelines/list-deployment-pipeline-stages) |
+| `/v1/deploymentPipelines/{pipelineId}/deploy` | POST | Deploy artifacts from source stage to target stage | [Deploy Stage Content](https://learn.microsoft.com/en-us/rest/api/fabric/core/deployment-pipelines/deploy-stage-content) |
+| `{Location header URL}` | GET | Poll long-running deployment operation status | [Long Running Operations](https://learn.microsoft.com/en-us/rest/api/fabric/core/long-running-operations) |
+
+### API Authentication
+
+All API calls use Azure AD bearer token authentication:
+```powershell
+$token = az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv
+```
+
+The service principal must have appropriate permissions on workspaces and deployment pipelines as described in the [Service Principal Setup](#service-principal-setup) section.
+
+### Additional Resources
+
+- [Microsoft Fabric REST API Overview](https://learn.microsoft.com/en-us/rest/api/fabric/)
+- [Fabric Git Integration](https://learn.microsoft.com/en-us/fabric/cicd/git-integration/intro-to-git-integration)
+- [Fabric Deployment Pipelines](https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines)
+
 ## Support
 
 For issues or questions:
