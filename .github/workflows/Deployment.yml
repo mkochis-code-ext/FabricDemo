@@ -30,6 +30,13 @@ jobs:
     environment: Fabric-Development
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Debug - show Azure service principal context
+        if: ${{ env.DEBUG == '1' }}
+        shell: pwsh
+        run: |
+          Write-Host "DEBUG=1; dumping Azure context for the signed-in identity..."
+          Write-Host "AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }}"
 
       - name: Azure login (service principal)
         uses: azure/login@v2
